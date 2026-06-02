@@ -1,0 +1,360 @@
+{% extends "base.html" %}
+{% block title %}数据可视化 - 数据分析系统{% endblock %}
+
+{% block head %}
+<style>
+    .chart-type-card {
+        cursor: pointer;
+        border: 2px solid transparent;
+        transition: all 0.2s;
+    }
+    .chart-type-card:hover {
+        border-color: #0d6efd;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .chart-type-card.active {
+        border-color: #0d6efd;
+        background-color: #e7f1ff;
+    }
+    .chart-type-card .card-body {
+        padding: 0.75rem;
+    }
+    .param-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 0.75rem;
+    }
+    .param-row label {
+        width: 110px;
+        margin-bottom: 0;
+        font-weight: 500;
+    }
+    .param-row select, .param-row input {
+        flex: 1;
+    }
+    #chart-img {
+        max-width: 100%;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+    }
+    .color-preset {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        cursor: pointer;
+        border: 2px solid transparent;
+        transition: all 0.15s;
+    }
+    .color-preset:hover, .color-preset.active {
+        border-color: #000;
+        transform: scale(1.2);
+    }
+    .placeholder-icon {
+        font-size: 5rem;
+        opacity: 0.3;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    {% if error %}
+    <div class="row">
+        <div class="col-md-12">
+            <div class="alert alert-warning">
+                ⚠️ {{ error }} — <a href="/" class="alert-link">前往上传</a>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card shadow-sm mb-3">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">📊 图表类型</h5>
+                </div>
+                <div class="card-body p-2" id="chart-type-list">
+                    <div class="text-center text-muted py-3">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        加载中...
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow-sm">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">⚙️ 图表参数</h5>
+                </div>
+                <div class="card-body" id="params-area">
+                    <p class="text-muted small">请先选择一种图表类型</p>
+                </div>
+                <div class="card-footer">
+                    <button class="btn btn-primary w-100" id="btn-generate" disabled>
+                        🎨 生成图表
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            <div class="card shadow-sm">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>📈 图表预览 — <small class="text-muted">{{ filename }}</small></span>
+                    <button class="btn btn-sm btn-outline-secondary" id="btn-download" disabled>
+                        ⬇ 下载图片
+                    </button>
+                </div>
+                <div class="card-body text-center" id="chart-display" style="min-height: 400px;">
+                    <div class="d-flex flex-column align-items-center justify-content-center py-5">
+                        <span class="placeholder-icon">📈</span>
+                        <p class="text-muted mt-3">选择图表类型并配置参数后，点击「生成图表」</p>
+                    </div>
+                    <img id="chart-img" src="" alt="图表" class="d-none">
+                </div>
+                <div class="card-footer text-muted small" id="chart-message"></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let chartOptions = null;
+let currentChartType = null;
+let currentImageB64 = null;
+
+const COLORS = ['#4C72B0','#DD8452','#55A868','#C44E52','#8172B3','#937860','#DA8BC3','#8C8C8C','#CCB974','#64B5CD',
+                '#023EFF','#FF7C00','#1AC938','#E8000B','#8B2BE2'];
+
+fetch('/visualize/options')
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            chartOptions = data;
+            renderChartTypeCards(data.chart_types);
+        }
+    });
+
+function renderChartTypeCards(types) {
+    const container = document.getElementById('chart-type-list');
+    if (types.length === 0) {
+        container.innerHTML = '<div class="text-muted text-center py-3">当前数据不支持任何图表类型</div>';
+        return;
+    }
+    container.innerHTML = types.map((t, i) => `
+        <div class="card chart-type-card mb-2" data-type="${t.type}"
+             onclick="selectChartType('${t.type}')">
+            <div class="card-body">
+                <strong>${t.icon} ${t.name}</strong>
+                <br><small class="text-muted">${t.description}</small>
+            </div>
+        </div>
+    `).join('');
+}
+
+function selectChartType(type) {
+    currentChartType = type;
+    document.querySelectorAll('.chart-type-card').forEach(c => c.classList.remove('active'));
+    const card = document.querySelector(`[data-type="${type}"]`);
+    if (card) card.classList.add('active');
+    renderParams(type);
+    document.getElementById('btn-generate').disabled = false;
+}
+
+function renderParams(type) {
+    const area = document.getElementById('params-area');
+    const { numeric_columns, categorical_columns, all_columns } = chartOptions;
+
+    let html = '';
+
+    switch (type) {
+    case 'bar':
+    case 'line':
+        html += paramSelect('x_column', 'X 轴列', all_columns, categorical_columns[0] || all_columns[0]);
+        html += paramSelect('y_column', 'Y 轴列', numeric_columns, numeric_columns[0]);
+        html += paramInput('title', '图表标题', '');
+        html += colorPicker();
+        if (type === 'bar') {
+            html += paramCheckbox('horizontal', '横向显示', false);
+        }
+        if (type === 'line') {
+            html += paramCheckbox('show_markers', '显示数据点', true);
+        }
+        html += '<hr class="my-2"><label class="fw-bold small text-muted">📋 数据范围（留空 = 显示全部，任意填两项自动算第三项）</label>';
+        html += paramInput('data_start', '起始项', '', 'number', '1');
+        html += paramInput('data_count', '显示项数', '', 'number', '');
+        html += paramInput('data_end', '结束项', '', 'number', '');
+        break;
+
+    case 'scatter':
+        html += paramSelect('x_column', 'X 轴列', numeric_columns, numeric_columns[0]);
+        html += paramSelect('y_column', 'Y 轴列', numeric_columns, numeric_columns[1] || numeric_columns[0]);
+        html += paramInput('title', '图表标题', '');
+        html += colorPicker();
+        html += paramInput('point_size', '点大小', '40', 'number', '10-200');
+        break;
+
+    case 'histogram':
+        html += paramSelect('column', '数据列', numeric_columns, numeric_columns[0]);
+        html += paramInput('bins', '分组数', '20', 'number', '5-100');
+        html += paramInput('title', '图表标题', '');
+        html += colorPicker();
+        html += paramCheckbox('show_kde', '显示密度曲线', false);
+        break;
+
+    case 'pie':
+        html += paramSelect('labels_column', '标签列', categorical_columns, categorical_columns[0] || all_columns[0]);
+        html += paramSelect('values_column', '数值列', numeric_columns, numeric_columns[0]);
+        html += paramInput('title', '图表标题', '');
+        html += '<hr class="my-2"><label class="fw-bold small text-muted">📋 数据范围（留空 = 显示全部，任意填两项自动算第三项，未选中部分归入"其他"）</label>';
+        html += paramInput('data_start', '起始项', '', 'number', '1');
+        html += paramInput('data_count', '显示项数', '', 'number', '');
+        html += paramInput('data_end', '结束项', '', 'number', '');
+        break;
+
+    case 'correlation_heatmap':
+        html += paramCheckboxGroup('columns', '参与列', numeric_columns, numeric_columns);
+        html += paramInput('title', '图表标题', '');
+        break;
+    }
+
+    area.innerHTML = html || '<p class="text-muted small">请先选择一种图表类型</p>';
+}
+
+function paramSelect(name, label, options, defaultVal) {
+    const opts = options.map(o => `<option value="${o}" ${o===defaultVal?'selected':''}>${o}</option>`).join('');
+    return `<div class="param-row">
+        <label>${label}</label>
+        <select class="form-select form-select-sm" name="${name}">${opts}</select>
+    </div>`;
+}
+
+function paramInput(name, label, defaultVal, type='text', placeholder='') {
+    return `<div class="param-row">
+        <label>${label}</label>
+        <input class="form-control form-control-sm" name="${name}" value="${defaultVal}"
+               type="${type}" placeholder="${placeholder}">
+    </div>`;
+}
+
+function paramCheckbox(name, label, defaultChecked) {
+    return `<div class="param-row">
+        <label></label>
+        <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="${name}"
+                   ${defaultChecked?'checked':''}>
+            <label class="form-check-label">${label}</label>
+        </div>
+    </div>`;
+}
+
+function paramCheckboxGroup(name, label, options, defaultSelected) {
+    const checks = options.map(o => `
+        <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" name="${name}" value="${o}"
+                   ${defaultSelected.includes(o)?'checked':''}>
+            <label class="form-check-label small">${o}</label>
+        </div>
+    `).join('');
+    return `<div class="mb-2">
+        <label class="fw-bold small">${label}</label>
+        <div class="ms-2">${checks}</div>
+    </div>`;
+}
+
+function colorPicker() {
+    const circles = COLORS.map((c, i) => `
+        <span class="color-preset ${i===0?'active':''}" style="background:${c}"
+              data-color="${c}" onclick="selectColor(this, '${c}')"></span>
+    `).join('');
+    return `<div class="param-row">
+        <label>颜色</label>
+        <div class="d-flex gap-1 flex-wrap">${circles}</div>
+    </div>`;
+}
+
+function selectColor(el, color) {
+    el.parentElement.querySelectorAll('.color-preset').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+}
+
+document.getElementById('btn-generate').addEventListener('click', function() {
+    if (!currentChartType) return;
+
+    const params = {};
+    const area = document.getElementById('params-area');
+
+    area.querySelectorAll('select[name]').forEach(s => { params[s.name] = s.value; });
+    area.querySelectorAll('input[type="text"][name], input[type="number"][name]').forEach(i => {
+        if (i.value) params[i.name] = i.value;
+    });
+    area.querySelectorAll('input[type="checkbox"][name]:not([value])').forEach(cb => {
+        params[cb.name] = cb.checked ? 'true' : 'false';
+    });
+
+    const checkedGroups = {};
+    area.querySelectorAll('input[type="checkbox"][name][value]:checked').forEach(cb => {
+        if (!checkedGroups[cb.name]) checkedGroups[cb.name] = [];
+        checkedGroups[cb.name].push(cb.value);
+    });
+    Object.entries(checkedGroups).forEach(([k, v]) => { params[k] = v.join(','); });
+
+    const activeColor = area.querySelector('.color-preset.active');
+    if (activeColor) params['color'] = activeColor.dataset.color;
+
+    showLoading();
+
+    fetch('/visualize/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chart_type: currentChartType, params: params })
+    })
+    .then(res => res.json())
+    .then(data => {
+        hideLoading();
+        if (data.success) {
+            currentImageB64 = data.image_base64;
+            const img = document.getElementById('chart-img');
+            img.src = data.image_base64;
+            img.classList.remove('d-none');
+            document.querySelector('#chart-display .d-flex').classList.add('d-none');
+            document.getElementById('btn-download').disabled = false;
+            document.getElementById('chart-message').innerHTML =
+                '<span class="text-success">✅ 图表生成成功</span>';
+        } else {
+            document.getElementById('chart-message').innerHTML =
+                '<span class="text-danger">❌ ' + data.message + '</span>';
+        }
+    })
+    .catch(err => {
+        hideLoading();
+        document.getElementById('chart-message').innerHTML =
+            '<span class="text-danger">❌ 请求失败: ' + err.message + '</span>';
+    });
+});
+
+document.getElementById('btn-download').addEventListener('click', function() {
+    if (!currentImageB64) return;
+    const a = document.createElement('a');
+    a.href = currentImageB64;
+    a.download = 'chart_' + currentChartType + '_' + new Date().getTime() + '.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+});
+
+function showLoading() {
+    document.getElementById('btn-generate').disabled = true;
+    document.getElementById('btn-generate').innerHTML =
+        '<span class="spinner-border spinner-border-sm"></span> 生成中...';
+}
+
+function hideLoading() {
+    document.getElementById('btn-generate').disabled = false;
+    document.getElementById('btn-generate').innerHTML = '🎨 生成图表';
+}
+</script>
+{% endblock %}
