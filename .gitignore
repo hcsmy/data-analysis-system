@@ -1,0 +1,21 @@
+# 虚拟环境
+venv/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 上传和导出文件（开发测试用）
+uploads/*
+!uploads/.gitkeep
+exports/*
+!exports/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db

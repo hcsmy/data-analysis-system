@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}数据预览 - 数据分析系统{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    {% if error %}
+    <div class="row">
+        <div class="col-md-12">
+            <div class="alert alert-warning">
+                ⚠️ {{ error }} — <a href="/" class="alert-link">前往上传</a>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <!-- 摘要卡片 -->
+    <div class="row mb-3">
+        <div class="col-md-2 col-6 mb-2">
+            <div class="card bg-primary text-white">
+                <div class="card-body text-center py-2">
+                    <small>文件名</small>
+                    <h6 class="mb-0 text-truncate" title="{{ filename }}">{{ filename }}</h6>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2 col-6 mb-2">
+            <div class="card bg-success text-white">
+                <div class="card-body text-center py-2">
+                    <small>总行数</small>
+                    <h5 class="mb-0">{{ stats.rows }}</h5>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2 col-6 mb-2">
+            <div class="card bg-info text-white">
+                <div class="card-body text-center py-2">
+                    <small>总列数</small>
+                    <h5 class="mb-0">{{ stats.columns }}</h5>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2 col-6 mb-2">
+            <div class="card bg-warning text-dark">
+                <div class="card-body text-center py-2">
+                    <small>缺失值</small>
+                    <h5 class="mb-0">{{ stats.missing_total }}</h5>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2 col-6 mb-2">
+            <div class="card bg-danger text-white">
+                <div class="card-body text-center py-2">
+                    <small>重复行</small>
+                    <h5 class="mb-0">{{ stats.duplicates }}</h5>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2 col-6 mb-2">
+            <div class="card bg-secondary text-white">
+                <div class="card-body text-center py-2">
+                    <small>内存占用</small>
+                    <h6 class="mb-0">{{ stats.memory_usage }}</h6>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 列信息 -->
+    <div class="row mb-3">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">📋 列信息</div>
+                <div class="card-body py-2">
+                    <div class="row">
+                        {% for col, dtype in stats.dtypes.items() %}
+                        <div class="col-md-3 col-6 mb-1">
+                            <span class="badge bg-light text-dark">{{ col }}</span>
+                            <small class="text-muted">{{ dtype }}</small>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 分页 + 数据表格 -->
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>📄 数据内容（第 {{ page }} / {{ total_pages }} 页）</span>
+                    <div>
+                        {% if page > 1 %}
+                        <a href="?page={{ page-1 }}" class="btn btn-sm btn-outline-primary">上一页</a>
+                        {% endif %}
+                        {% if page < total_pages %}
+                        <a href="?page={{ page+1 }}" class="btn btn-sm btn-outline-primary">下一页</a>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="card-body p-2">
+                    <div class="table-responsive" style="max-height: 500px; overflow: auto;">
+                        {{ table | safe }}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
