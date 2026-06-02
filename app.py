@@ -10,8 +10,7 @@ app = Flask(__name__)
 app.secret_key = 'dev-secret-key-change-in-production'
 dm = DataManager()
 
-# 全局变量存储当前数据（开发阶段用，后续可改为数据库）
-current_data = {'df': None, 'filepath': None, 'filename': None}
+# 数据状态由 DataManager 实例统一管理
 
 
 @app.route('/')
@@ -38,10 +37,10 @@ def upload_file():
     if error:
         return jsonify({'success': False, 'message': error}), 400
 
-    # 步骤3：存储到全局变量
-    current_data['df'] = df
-    current_data['filepath'] = filepath
-    current_data['filename'] = file.filename
+    # 步骤3：存入 DataManager（供所有模块共享）
+    dm.df = df
+    dm.filepath = filepath
+    dm.filename = file.filename
 
     # 步骤4：返回摘要信息
     info = dm.get_data_info(df, filepath)
@@ -55,7 +54,7 @@ def upload_file():
 @app.route('/preview')
 def preview():
     """数据预览页"""
-    df = current_data.get('df')
+    df = dm.df
     if df is None:
         return render_template('preview.html', error='请先上传文件')
 
@@ -77,36 +76,36 @@ def preview():
     )
 
     # 统计信息
-    stats = dm.get_data_info(df, current_data['filepath'])
+    stats = dm.get_data_info(df, dm.filepath)
 
     return render_template('preview.html',
                            table=preview_html,
                            stats=stats,
                            page=page,
                            total_pages=total_pages,
-                           filename=current_data.get('filename', '未知'))
+                           filename=dm.filename or '未知')
 
 
 @app.route('/export')
 def export_page():
     """导出选择页面"""
-    df = current_data.get('df')
+    df = dm.df
     if df is None:
         return render_template('export.html', error='请先上传文件')
     return render_template('export.html',
-                           filename=current_data.get('filename'),
+                           filename=dm.filename,
                            columns=df.columns.tolist())
 
 
 @app.route('/export/download', methods=['POST'])
 def export_download():
     """执行数据导出并下载"""
-    df = current_data.get('df')
+    df = dm.df
     if df is None:
         return jsonify({'success': False, 'message': '无数据可导出'}), 400
 
     format_type = request.form.get('format', 'csv')
-    base_name = current_data['filename'].rsplit('.', 1)[0]
+    base_name = dm.filename.rsplit('.', 1)[0] if dm.filename else 'data'
 
     filepath, error = dm.export_data(df, format_type, base_name=base_name)
     if error:

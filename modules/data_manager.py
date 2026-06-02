@@ -9,13 +9,17 @@ from datetime import datetime
 
 
 class DataManager:
-    """数据管理器 —— 处理文件的完整生命周期"""
+    """数据管理器 —— 处理文件的完整生命周期，同时作为模块间数据共享的中心"""
 
     ALLOWED_EXTENSIONS = {'csv', 'xls', 'xlsx'}
 
     def __init__(self, upload_folder='uploads'):
         self.upload_folder = upload_folder
         os.makedirs(upload_folder, exist_ok=True)
+        # ---- 内部状态：当前数据 ----
+        self.df = None          # 当前 DataFrame
+        self.filepath = None    # 当前文件路径
+        self.filename = None    # 当前文件名
 
     # ==================== 文件上传 ====================
 
@@ -114,3 +118,45 @@ class DataManager:
 
         except Exception as e:
             return None, f"导出失败: {str(e)}"
+
+    # ==================== 队友调用接口 ====================
+
+    def get_current_data(self):
+        """
+        【供清洗/可视化/分析模块调用】
+        获取当前数据及元信息
+        返回: dict，包含 DataFrame、列名、数值列、分类列等
+        """
+        if self.df is None:
+            return {'df': None, 'message': '暂无数据，请先上传文件'}
+
+        return {
+            'df': self.df,                              # Pandas DataFrame，供任何模块使用
+            'filename': self.filename,                  # 原始文件名
+            'columns': self.df.columns.tolist(),        # 全部列名
+            'numeric_columns': self.df.select_dtypes(   # 数值列（用于绘图、聚类）
+                include=['number']).columns.tolist(),
+            'categorical_columns': self.df.select_dtypes(  # 分类列
+                include=['object']).columns.tolist(),
+            'shape': self.df.shape,                     # (行数, 列数)
+            'dtypes': {col: str(dtype) for col, dtype   # 每列数据类型
+                       in self.df.dtypes.items()},
+        }
+
+    def update_data(self, df, message='数据已更新'):
+        """
+        【供清洗模块调用】
+        接收清洗/处理后的新 DataFrame，替换当前数据
+        参数:
+            df: 新的 DataFrame
+            message: 更新说明
+        返回: {'success': True/False, 'message': str}
+        """
+        if not isinstance(df, pd.DataFrame):
+            return {'success': False, 'message': '数据类型错误，需要 pandas DataFrame'}
+        self.df = df
+        return {'success': True, 'message': message}
+
+    def has_data(self):
+        """【供所有模块调用】检查是否有数据"""
+        return self.df is not None
