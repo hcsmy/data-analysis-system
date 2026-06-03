@@ -6,12 +6,14 @@ import os
 from flask import Flask, render_template, request, jsonify, send_file
 from modules.data_manager import DataManager
 from modules.visualization import visualization_bp, init_visualization
+from modules.database import database_bp
 
 app = Flask(__name__)
 app.secret_key = 'dev-secret-key-change-in-production'
 dm = DataManager()
 init_visualization(dm)
 app.register_blueprint(visualization_bp)
+app.register_blueprint(database_bp)
 
 # 数据状态由 DataManager 实例统一管理
 
