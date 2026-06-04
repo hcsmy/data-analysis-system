@@ -2,6 +2,7 @@
 数据管理与分析系统 - 主入口
 小组项目：交互式数据分析系统
 """
+from modules.ml_analysis import kmeans_cluster,calculate_elbow_value
 import os
 from flask import Flask, render_template, request, jsonify, send_file
 from modules.data_manager import DataManager
@@ -121,7 +122,27 @@ def export_download():
         download_name = f"{base_name}.xlsx"
 
     return send_file(filepath, as_attachment=True, download_name=download_name)
+@app.route('/analysis',methods=["GET","POST"])
+def analysis():
+    # 直接取用项目全局DataManager中已上传的数据，无需path参数
+    df = dm.df
+    res_data,score,group_cnt,sse_data = None,None,None,None
+    # 无数据时页面提示
+    if df is None:
+        return render_template("analysis.html",error="请先上传数据文件！",table_data=None)
+    
+    if request.method == "POST":
+        # 前端提交K值，默认3
+        k = int(request.form.get("k_value", default=3))
+        res_df,score,group_cnt = kmeans_cluster(df,k)
+        res_data = res_df.to_dict("records")
+        sse_data = calculate_elbow_value(df)
 
+    return render_template("analysis.html",
+                           table_data=res_data,
+                           sil_score=score,
+                           group_info=group_cnt,
+                           elbow_sse=sse_data)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
