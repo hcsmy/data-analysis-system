@@ -3,12 +3,12 @@
 负责：图表生成、可视化页面路由、图表参数配置
 ==============================================
 【集成说明】在 app.py 中添加以下代码即可：
-    from modules.visualization import visualization_bp, init_visualization
+    from modules. Visualization import visualization_bp, init_visualization
     init_visualization(dm)
     app.register_blueprint(visualization_bp)
 
 【供分析/清洗模块调用接口】
-    from modules.visualization import VisualizationManager
+    from modules. Visualization import VisualizationManager
     vm = VisualizationManager()
     chart_base64 = vm.generate_chart(df, chart_type, params)
     chart_options = vm.get_available_charts(df)
@@ -306,13 +306,17 @@ class VisualizationManager:
                 alpha=0.75, edgecolor='white', linewidth=0.5)
 
         if show_kde and len(data) > 1:
-            from scipy.stats import gaussian_kde
-            kde = gaussian_kde(data)
-            x_kde = np.linspace(data.min(), data.max(), 200)
-            ax2 = ax.twinx()
-            ax2.plot(x_kde, kde(x_kde), color='red', linewidth=2, label='KDE')
-            ax2.set_ylabel('密度', color='red')
-            ax2.legend(loc='upper right')
+            try:
+                from scipy.stats import gaussian_kde
+            except ImportError:
+                pass
+            else:
+                kde = gaussian_kde(data)
+                x_kde = np.linspace(data.min(), data.max(), 200)
+                ax2 = ax.twinx()
+                ax2.plot(x_kde, kde(x_kde), color='red', linewidth=2, label='KDE')
+                ax2.set_ylabel('密度', color='red')
+                ax2.legend(loc='upper right')
 
         ax.set_title(params.get('title', f'{column} 分布直方图'),
                      fontsize=14, fontweight='bold')

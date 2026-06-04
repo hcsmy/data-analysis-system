@@ -1,0 +1,583 @@
+{% extends "base.html" %}
+{% block title %}数据清洗 - 数据分析系统{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    {% if error %}
+    <div class="row">
+        <div class="col-md-12">
+            <div class="alert alert-warning">
+                {{ error }} — <a href="/" class="alert-link">前往上传</a>
+            </div>
+        </div>
+    </div>
+    {% else %}
+
+    <!-- 操作提示 -->
+    <div id="message-area"></div>
+
+    <!-- 缺失值概览卡片 -->
+    <div class="row mb-3">
+        <div class="col-md-3 col-6 mb-2">
+            <div class="card bg-warning text-dark">
+                <div class="card-body text-center py-2">
+                    <small>缺失值总数</small>
+                    <h4 class="mb-0" id="missing-total">{{ missing.total_missing }}</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6 mb-2">
+            <div class="card bg-info text-white">
+                <div class="card-body text-center py-2">
+                    <small>缺失比例</small>
+                    <h4 class="mb-0" id="missing-percent">{{ missing.overall_percent }}%</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6 mb-2">
+            <div class="card bg-secondary text-white">
+                <div class="card-body text-center py-2">
+                    <small>总行数</small>
+                    <h4 class="mb-0" id="total-rows">{{ missing.total_rows }}</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6 mb-2">
+            <div class="card bg-success text-white">
+                <div class="card-body text-center py-2">
+                    <small>当前文件</small>
+                    <h6 class="mb-0 text-truncate" title="{{ filename }}">{{ filename }}</h6>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- ===== 左侧：缺失值处理 ===== -->
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header bg-primary text-white">
+                    <strong>缺失值处理</strong>
+                </div>
+                <div class="card-body">
+                    <!-- 缺失值列信息 -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">缺失值分布</label>
+                        <div style="max-height: 200px; overflow-y: auto;">
+                            {% if missing.columns_missing %}
+                            <table class="table table-sm table-bordered mb-0">
+                                <thead class="table-light">
+                                    <tr><th>列名</th><th>缺失数</th><th>比例</th><th>类型</th></tr>
+                                </thead>
+                                <tbody>
+                                    {% for col in missing.columns_missing %}
+                                    <tr>
+                                        <td>{{ col.column }}</td>
+                                        <td>{{ col.missing_count }}</td>
+                                        <td>{{ col.missing_percent }}%</td>
+                                        <td><small class="text-muted">{{ col.dtype }}</small></td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                            {% else %}
+                            <p class="text-muted small mb-0">当前数据无缺失值</p>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <!-- 缺失值处理表单 -->
+                    <form id="missing-form">
+                        <div class="mb-2">
+                            <label class="form-label fw-bold">选择要处理的列</label>
+                            <div class="d-flex gap-2 mb-2">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="selectAllMissing()">全选</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="deselectAllMissing()">取消</button>
+                                <button type="button" class="btn btn-outline-info btn-sm" onclick="selectMissingCols()">仅含缺失值列</button>
+                            </div>
+                            <div id="missing-columns-checkbox" style="max-height: 150px; overflow-y: auto;">
+                                {% for col in columns %}
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input missing-col-check" type="checkbox" value="{{ col }}" id="mcol_{{ loop.index }}">
+                                    <label class="form-check-label small" for="mcol_{{ loop.index }}">{{ col }}</label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label fw-bold">处理方式</label>
+                            <select class="form-select" id="missing-method" onchange="toggleCustomInput()">
+                                <option value="drop">删除含缺失值的行</option>
+                                <option value="mean" selected>均值填充（数值列）</option>
+                                <option value="median">中位数填充（数值列）</option>
+                                <option value="mode">众数填充</option>
+                                <option value="custom">自定义值填充</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3 d-none" id="custom-value-area">
+                            <label class="form-label fw-bold">自定义填充值</label>
+                            <input type="text" class="form-control" id="custom-fill-value" placeholder="输入填充值">
+                        </div>
+
+                        <button type="submit" class="btn btn-primary w-100">执行缺失值处理</button>
+                    </form>
+
+                    <div id="missing-result" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 右侧：异常值检测 ===== -->
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header bg-danger text-white">
+                    <strong>异常值检测</strong>
+                </div>
+                <div class="card-body">
+                    <form id="outlier-form">
+                        <div class="mb-2">
+                            <label class="form-label fw-bold">选择数值列</label>
+                            <div class="d-flex gap-2 mb-2">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="selectAllOutlier()">全选</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="deselectAllOutlier()">取消</button>
+                            </div>
+                            <div id="outlier-columns-checkbox" style="max-height: 120px; overflow-y: auto;">
+                                {% for col in numeric_columns %}
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input outlier-col-check" type="checkbox" value="{{ col }}" id="ocol_{{ loop.index }}">
+                                    <label class="form-check-label small" for="ocol_{{ loop.index }}">{{ col }}</label>
+                                </div>
+                                {% endfor %}
+                                {% if not numeric_columns %}
+                                <p class="text-muted small mb-0">当前数据无数值列</p>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="row mb-2">
+                            <div class="col-6">
+                                <label class="form-label fw-bold">检测方法</label>
+                                <select class="form-select" id="outlier-method" onchange="toggleOutlierThreshold()">
+                                    <option value="iqr" selected>IQR（四分位距）</option>
+                                    <option value="zscore">Z-Score（标准分数）</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label fw-bold" id="threshold-label">IQR 乘数</label>
+                                <input type="number" class="form-control" id="outlier-threshold"
+                                       value="1.5" step="0.5" min="0.5">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-danger w-100">检测异常值</button>
+                    </form>
+
+                    <div id="outlier-result" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 自动化清洗规则配置（加分项） ===== -->
+    <div class="row mb-3">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                    <strong>自动化清洗规则配置</strong>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-light" onclick="loadPreset('standard')">标准预设</button>
+                        <button class="btn btn-outline-light" onclick="loadPreset('strict')">严格预设</button>
+                        <button class="btn btn-outline-light" onclick="loadPreset('light')">轻度预设</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <!-- 规则列表 -->
+                        <div class="col-md-8">
+                            <div id="auto-rules-list">
+                                <p class="text-muted">加载中...</p>
+                            </div>
+                            <div class="d-flex gap-2 mt-2">
+                                <button class="btn btn-outline-success btn-sm" onclick="addAutoRule()">+ 添加规则</button>
+                                <button class="btn btn-success btn-sm" onclick="executeAutoConfig()">执行自动化清洗</button>
+                            </div>
+                        </div>
+                        <!-- 执行日志 -->
+                        <div class="col-md-4">
+                            <label class="fw-bold small">执行日志</label>
+                            <div id="auto-logs" style="max-height: 250px; overflow-y: auto; background: #f8f9fa; border-radius: 4px; padding: 8px; font-size: 0.85rem;">
+                                <span class="text-muted">等待执行...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 快捷去重 ===== -->
+    <div class="row mb-3">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <strong>快捷操作</strong>
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-outline-secondary" onclick="removeDuplicates()">删除重复行</button>
+                    <button class="btn btn-outline-primary ms-2" onclick="location.reload()">刷新数据状态</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ==================== 缺失值处理 ====================
+function selectAllMissing() {
+    document.querySelectorAll('.missing-col-check').forEach(cb => cb.checked = true);
+}
+function deselectAllMissing() {
+    document.querySelectorAll('.missing-col-check').forEach(cb => cb.checked = false);
+}
+function selectMissingCols() {
+    const missingCols = [{% for col in missing.columns_missing %}'{{ col.column }}'{% if not loop.last %},{% endif %}{% endfor %}];
+    document.querySelectorAll('.missing-col-check').forEach(cb => {
+        cb.checked = missingCols.includes(cb.value);
+    });
+}
+
+function toggleCustomInput() {
+    const method = document.getElementById('missing-method').value;
+    document.getElementById('custom-value-area').classList.toggle('d-none', method !== 'custom');
+}
+
+document.getElementById('missing-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const checked = document.querySelectorAll('.missing-col-check:checked');
+    if (checked.length === 0) {
+        showMessage('请至少选择一列', 'warning');
+        return;
+    }
+    const columns = Array.from(checked).map(cb => cb.value);
+    const method = document.getElementById('missing-method').value;
+    const fill_value = document.getElementById('custom-fill-value').value;
+
+    fetch('/cleaning/missing', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({columns, method, fill_value})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showMessage(data.message, 'success');
+            document.getElementById('missing-result').innerHTML =
+                '<div class="alert alert-success small">' + data.message + '</div>';
+            if (data.missing) {
+                document.getElementById('missing-total').textContent = data.missing.total_missing;
+                document.getElementById('missing-percent').textContent = data.missing.overall_percent + '%';
+                document.getElementById('total-rows').textContent = data.missing.total_rows;
+            }
+        } else {
+            showMessage(data.message, 'danger');
+        }
+    });
+});
+
+// ==================== 异常值检测 ====================
+function selectAllOutlier() {
+    document.querySelectorAll('.outlier-col-check').forEach(cb => cb.checked = true);
+}
+function deselectAllOutlier() {
+    document.querySelectorAll('.outlier-col-check').forEach(cb => cb.checked = false);
+}
+
+function toggleOutlierThreshold() {
+    const method = document.getElementById('outlier-method').value;
+    const label = document.getElementById('threshold-label');
+    const input = document.getElementById('outlier-threshold');
+    if (method === 'iqr') {
+        label.textContent = 'IQR 乘数';
+        input.value = '1.5';
+        input.step = '0.5';
+    } else {
+        label.textContent = 'Z-Score 阈值';
+        input.value = '3.0';
+        input.step = '0.5';
+    }
+}
+
+let lastOutlierResult = null;
+
+document.getElementById('outlier-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const checked = document.querySelectorAll('.outlier-col-check:checked');
+    if (checked.length === 0) {
+        showMessage('请至少选择一个数值列', 'warning');
+        return;
+    }
+    const columns = Array.from(checked).map(cb => cb.value);
+    const method = document.getElementById('outlier-method').value;
+    const threshold = document.getElementById('outlier-threshold').value;
+
+    fetch('/cleaning/outlier-detect', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({columns, method, threshold})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            lastOutlierResult = data.result;
+            let html = '<div class="alert alert-warning small"><strong>检测结果</strong><br>';
+            html += '方法: ' + data.result.method.toUpperCase() + ' | ';
+            html += '异常值行数: ' + data.result.total_outlier_rows + ' | ';
+            html += '异常值点数: ' + data.result.total_outliers + '<br>';
+
+            for (const [col, info] of Object.entries(data.result.columns)) {
+                html += '<b>' + col + '</b>: ' + info.outlier_count + '个异常值 (' + info.outlier_percent + '%)<br>';
+            }
+            html += '</div>';
+
+            if (data.result.total_outlier_rows > 0) {
+                let allIndices = [];
+                for (const info of Object.values(data.result.columns)) {
+                    allIndices = allIndices.concat(info.outlier_indices);
+                }
+                allIndices = [...new Set(allIndices)];
+                html += '<button class="btn btn-sm btn-outline-danger" onclick="removeOutliers(' +
+                        JSON.stringify(allIndices).replace(/"/g, "'") +
+                        ')">删除 ' + allIndices.length + ' 行异常数据</button>';
+            }
+
+            document.getElementById('outlier-result').innerHTML = html;
+        } else {
+            showMessage(data.message, 'danger');
+        }
+    });
+});
+
+function removeOutliers(indices) {
+    if (!confirm('确定要删除 ' + indices.length + ' 行异常数据吗？此操作不可撤销。')) return;
+
+    fetch('/cleaning/outlier-remove', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({indices})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showMessage(data.message, 'success');
+            document.getElementById('outlier-result').innerHTML =
+                '<div class="alert alert-success small">' + data.message + '</div>';
+            document.getElementById('total-rows').textContent =
+                parseInt(document.getElementById('total-rows').textContent) - indices.length;
+        }
+    });
+}
+
+// ==================== 快捷操作 ====================
+function removeDuplicates() {
+    if (!confirm('确定要删除所有重复行吗？')) return;
+    fetch('/cleaning/duplicates', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+        showMessage(data.message, data.success ? 'success' : 'info');
+        if (data.success) location.reload();
+    });
+}
+
+// ==================== 消息提示 ====================
+function showMessage(msg, type) {
+    const area = document.getElementById('message-area');
+    area.innerHTML = '<div class="alert alert-' + type + ' alert-dismissible fade show" role="alert">' +
+        msg +
+        '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+    setTimeout(() => { area.innerHTML = ''; }, 5000);
+}
+
+// ==================== 自动化清洗规则配置 ====================
+let autoConfig = null;
+
+function loadAutoConfig() {
+    fetch('/cleaning/auto-config')
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            autoConfig = data.config;
+            renderAutoRules();
+        }
+    });
+}
+
+function renderAutoRules() {
+    if (!autoConfig || !autoConfig.rules) {
+        document.getElementById('auto-rules-list').innerHTML = '<p class="text-muted">暂无规则</p>';
+        return;
+    }
+    const rules = autoConfig.rules;
+    if (rules.length === 0) {
+        document.getElementById('auto-rules-list').innerHTML = '<p class="text-muted">暂无规则，点击「添加规则」开始配置</p>';
+        return;
+    }
+    let html = '';
+    rules.forEach((rule, idx) => {
+        const typeLabel = {
+            'missing': '缺失值处理',
+            'outlier': '异常值检测',
+            'remove_duplicates': '删除重复行'
+        }[rule.rule_type] || rule.rule_type;
+
+        const methodLabel = {
+            'drop': '删除行', 'mean': '均值填充', 'median': '中位数填充',
+            'mode': '众数填充', 'custom': '自定义值'
+        }[rule.method] || '';
+
+        const outlierLabel = rule.outlier_method === 'iqr' ? 'IQR(' + (rule.threshold || 1.5) + ')' :
+                              rule.outlier_method === 'zscore' ? 'Z-Score(' + (rule.threshold || 3.0) + ')' : '';
+
+        let detail = '';
+        if (rule.rule_type === 'missing') {
+            detail = methodLabel + (rule.fill_value ? '=' + rule.fill_value : '') +
+                     (rule.columns.length > 0 ? ' [' + rule.columns.join(',') + ']' : ' [全部列]');
+        } else if (rule.rule_type === 'outlier') {
+            detail = outlierLabel + (rule.columns.length > 0 ? ' [' + rule.columns.join(',') + ']' : ' [全部数值列]');
+        }
+
+        html += '<div class="border rounded p-2 mb-2 ' + (rule.enabled ? '' : 'opacity-50') + '">' +
+            '<div class="d-flex justify-content-between align-items-center">' +
+            '<span><span class="badge bg-primary me-1">' + (idx + 1) + '</span>' +
+            '<strong>' + typeLabel + '</strong>' +
+            (detail ? ' <small class="text-muted">' + detail + '</small>' : '') +
+            '</span>' +
+            '<div class="btn-group btn-group-sm">' +
+            '<button class="btn btn-sm ' + (rule.enabled ? 'btn-success' : 'btn-outline-secondary') +
+            '" onclick="toggleRule(' + idx + ')">' + (rule.enabled ? '启用' : '禁用') + '</button>' +
+            '<button class="btn btn-sm btn-outline-danger" onclick="removeRule(' + idx + ')">&times;</button>' +
+            '</div></div></div>';
+    });
+    document.getElementById('auto-rules-list').innerHTML = html;
+}
+
+function addAutoRule() {
+    const typeLabel = prompt('规则类型:\n1. missing (缺失值处理)\n2. outlier (异常值检测)\n3. remove_duplicates (删除重复行)\n请输入编号:');
+    const typeMap = {'1': 'missing', '2': 'outlier', '3': 'remove_duplicates'};
+    const ruleType = typeMap[typeLabel];
+    if (!ruleType) return;
+
+    let method = '', outlierMethod = '', threshold = 0, fillValue = '';
+
+    if (ruleType === 'missing') {
+        const m = prompt('处理方法:\n1. drop (删除行)\n2. mean (均值)\n3. median (中位数)\n4. mode (众数)\n5. custom (自定义)\n请输入编号:');
+        const methodMap = {'1': 'drop', '2': 'mean', '3': 'median', '4': 'mode', '5': 'custom'};
+        method = methodMap[m] || 'mean';
+        if (method === 'custom') {
+            fillValue = prompt('请输入自定义填充值:') || '';
+        }
+    } else if (ruleType === 'outlier') {
+        const om = prompt('检测方法:\n1. iqr (IQR四分位距)\n2. zscore (Z-Score标准分数)\n请输入编号:');
+        outlierMethod = om === '2' ? 'zscore' : 'iqr';
+        const t = prompt(outlierMethod === 'iqr' ? 'IQR乘数 (默认1.5):' : 'Z-Score阈值 (默认3.0):');
+        threshold = parseFloat(t) || (outlierMethod === 'iqr' ? 1.5 : 3.0);
+    }
+
+    autoConfig.rules.push({
+        rule_type: ruleType,
+        columns: [],
+        method: method,
+        fill_value: fillValue,
+        outlier_method: outlierMethod,
+        threshold: threshold,
+        enabled: true
+    });
+
+    fetch('/cleaning/auto-config/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(autoConfig)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) loadAutoConfig();
+    });
+}
+
+function removeRule(idx) {
+    autoConfig.rules.splice(idx, 1);
+    fetch('/cleaning/auto-config/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(autoConfig)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) loadAutoConfig();
+    });
+}
+
+function toggleRule(idx) {
+    autoConfig.rules[idx].enabled = !autoConfig.rules[idx].enabled;
+    fetch('/cleaning/auto-config/save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(autoConfig)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) loadAutoConfig();
+    });
+}
+
+function loadPreset(preset) {
+    fetch('/cleaning/auto-config/preset', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({preset})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            autoConfig = data.config;
+            renderAutoRules();
+            showMessage(data.message, 'success');
+        }
+    });
+}
+
+function executeAutoConfig() {
+    if (!confirm('确定要执行自动化清洗吗？清洗后数据将直接更新。')) return;
+    fetch('/cleaning/auto-config/execute', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+        const logDiv = document.getElementById('auto-logs');
+        if (data.success) {
+            let html = '<div class="text-success fw-bold small">' + data.message + '</div>';
+            if (data.logs) {
+                data.logs.forEach(log => { html += '<div class="small">' + log + '</div>'; });
+            }
+            logDiv.innerHTML = html;
+            showMessage(data.message, 'success');
+            if (data.missing) {
+                document.getElementById('missing-total').textContent = data.missing.total_missing;
+                document.getElementById('missing-percent').textContent = data.missing.overall_percent + '%';
+                document.getElementById('total-rows').textContent = data.missing.total_rows;
+            }
+        } else {
+            logDiv.innerHTML = '<div class="text-danger small">' + data.message + '</div>';
+            showMessage(data.message, 'danger');
+        }
+    });
+}
+
+if (!document.querySelector('.alert-warning')) {
+    loadAutoConfig();
+}
+</script>
+{% endblock %}
