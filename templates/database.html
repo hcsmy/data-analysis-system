@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}数据库管理 - 数据分析系统{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h3>🗄️ 数据库管理</h3>
+    <p class="text-muted small">SQLite 本地存储 — 可将分析结果持久化保存，支持历史记录和 SQL 查询</p>
+
+    <div class="row">
+        <!-- 左侧：保存当前数据 -->
+        <div class="col-md-5">
+            <div class="card mb-3">
+                <div class="card-header bg-primary text-white">💾 保存当前数据</div>
+                <div class="card-body">
+                    <form id="save-form">
+                        <div class="mb-2">
+                            <label class="form-label">表名</label>
+                            <input type="text" class="form-control" name="table_name"
+                                   placeholder="例如：cleaned_employee" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">备注说明</label>
+                            <input type="text" class="form-control" name="description"
+                                   placeholder="例如：清洗后的员工数据">
+                        </div>
+                        <button type="submit" class="btn btn-primary">保存到数据库</button>
+                        <span id="save-status" class="ms-2"></span>
+                    </form>
+                </div>
+            </div>
+
+            <!-- SQL 查询 -->
+            <div class="card mb-3">
+                <div class="card-header bg-info text-white">🔍 SQL 查询</div>
+                <div class="card-body">
+                    <form id="query-form">
+                        <div class="mb-2">
+                            <textarea class="form-control" name="sql" rows="3"
+                                      placeholder="SELECT * FROM table_name WHERE ..." required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-info btn-sm">执行查询</button>
+                        <span id="query-status" class="ms-2"></span>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：已保存的表 -->
+        <div class="col-md-7">
+            <div class="card">
+                <div class="card-header bg-success text-white">📋 已保存的数据表</div>
+                <div class="card-body" id="tables-area">
+                    <p class="text-muted">加载中...</p>
+                </div>
+            </div>
+
+            <!-- 查询结果 -->
+            <div class="card mt-3 d-none" id="query-result-card">
+                <div class="card-header bg-warning">📊 查询结果</div>
+                <div class="card-body p-2">
+                    <div class="table-responsive" style="max-height: 300px; overflow: auto;" id="query-result-table"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ---- 页面加载：刷新表列表 ----
+function loadTables() {
+    fetch('/database/tables')
+        .then(r => r.json())
+        .then(data => {
+            const area = document.getElementById('tables-area');
+            if (data.tables.length === 0) {
+                area.innerHTML = '<p class="text-muted">暂无保存的数据表</p>';
+                return;
+            }
+            let html = '<div class="list-group">';
+            data.tables.forEach(t => {
+                html += `
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>${t.table_name}</strong>
+                        <small class="text-muted ms-2">${t.rows}行 × ${t.columns}列</small>
+                        <br><small class="text-muted">${t.saved_at} | ${t.description || '无备注'}</small>
+                    </div>
+                    <div>
+                        <button class="btn btn-sm btn-outline-primary" onclick="loadTable('${t.table_name}')">加载</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteTable('${t.table_name}')">删除</button>
+                    </div>
+                </div>`;
+            });
+            html += '</div>';
+            area.innerHTML = html;
+        });
+}
+loadTables();
+
+// ---- 保存当前数据 ----
+document.getElementById('save-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const status = document.getElementById('save-status');
+    status.innerHTML = '<span class="text-muted">保存中...</span>';
+
+    fetch('/database/save', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            status.innerHTML = data.success
+                ? '<span class="text-success">✅ ' + data.message + '</span>'
+                : '<span class="text-danger">❌ ' + data.message + '</span>';
+            if (data.success) loadTables();
+        });
+});
+
+// ---- 加载表 ----
+function loadTable(name) {
+    fetch('/database/load/' + name, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            alert(data.message);
+        });
+}
+
+// ---- 删除表 ----
+function deleteTable(name) {
+    if (!confirm('确定删除表 [' + name + ']？此操作不可恢复。')) return;
+    fetch('/database/table/' + name, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            alert(data.message);
+            loadTables();
+        });
+}
+
+// ---- SQL 查询 ----
+document.getElementById('query-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const status = document.getElementById('query-status');
+    status.innerHTML = '<span class="text-muted">查询中...</span>';
+
+    fetch('/database/query', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                status.innerHTML = '<span class="text-success">✅ ' + data.rows + ' 条结果</span>';
+                document.getElementById('query-result-card').classList.remove('d-none');
+                document.getElementById('query-result-table').innerHTML = data.html;
+            } else {
+                status.innerHTML = '<span class="text-danger">❌ ' + data.message + '</span>';
+            }
+        });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}上传数据 - 数据分析系统{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">📁 数据文件上传</h4>
+                </div>
+                <div class="card-body">
+                    <!-- 拖拽上传区域 -->
+                    <div id="drop-zone"
+                         class="border rounded p-5 text-center mb-3"
+                         style="border-style: dashed !important; background: #fafafa;">
+                        <p class="text-muted fs-5">📂 拖拽文件到此处</p>
+                        <p class="text-muted small">或点击下方按钮选择文件</p>
+                        <p class="text-muted small">支持格式：CSV、Excel (.xls, .xlsx)</p>
+                        <input type="file" id="file-input"
+                               accept=".csv,.xls,.xlsx"
+                               class="form-control mt-3">
+                    </div>
+
+                    <!-- 进度条 -->
+                    <div id="progress-area" class="d-none mb-3">
+                        <div class="progress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                 style="width: 100%">正在上传处理...</div>
+                        </div>
+                    </div>
+
+                    <!-- 结果展示 -->
+                    <div id="result-area" class="d-none">
+                        <div id="result-message" class="alert"></div>
+                        <div id="file-stats" class="row g-3 mb-3"></div>
+                        <div class="d-flex gap-2">
+                            <a href="/preview" class="btn btn-success">🔍 查看数据预览</a>
+                            <a href="/export" class="btn btn-info">⬇ 导出数据</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 使用说明 -->
+            <div class="card mt-3">
+                <div class="card-header">💡 使用说明</div>
+                <div class="card-body">
+                    <ol class="mb-0 small">
+                        <li>上传 CSV 或 Excel 格式的数据文件</li>
+                        <li>系统自动加载并显示基本信息</li>
+                        <li>前往「数据预览」页面查看完整数据</li>
+                        <li>经过清洗和分析后，可导出处理结果</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const fileInput = document.getElementById('file-input');
+const dropZone = document.getElementById('drop-zone');
+const progressArea = document.getElementById('progress-area');
+const resultArea = document.getElementById('result-area');
+
+// 文件选择事件
+fileInput.addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (file) uploadFile(file);
+});
+
+// 拖拽事件
+dropZone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    dropZone.style.borderColor = '#0d6efd';
+    dropZone.style.background = '#e7f1ff';
+});
+
+dropZone.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    dropZone.style.borderColor = '#ccc';
+    dropZone.style.background = '#fafafa';
+});
+
+dropZone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dropZone.style.borderColor = '#ccc';
+    dropZone.style.background = '#fafafa';
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        fileInput.files = files;
+        uploadFile(files[0]);
+    }
+});
+
+function uploadFile(file) {
+    // 显示进度
+    progressArea.classList.remove('d-none');
+    resultArea.classList.add('d-none');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/upload', { method: 'POST', body: formData })
+        .then(res => res.json())
+        .then(data => {
+            progressArea.classList.add('d-none');
+            resultArea.classList.remove('d-none');
+
+            const msgEl = document.getElementById('result-message');
+            if (data.success) {
+                msgEl.className = 'alert alert-success';
+                msgEl.innerHTML = '✅ ' + data.message;
+
+                const info = data.info;
+                document.getElementById('file-stats').innerHTML = `
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2 text-center">
+                            <small class="text-muted">行数</small>
+                            <h5 class="mb-0">${info.rows}</h5>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2 text-center">
+                            <small class="text-muted">列数</small>
+                            <h5 class="mb-0">${info.columns}</h5>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2 text-center">
+                            <small class="text-muted">文件大小</small>
+                            <h5 class="mb-0">${info.file_size}</h5>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="border rounded p-2 text-center">
+                            <small class="text-muted">列名</small>
+                            <h6 class="mb-0 text-truncate" title="${info.column_names.join(', ')}">
+                                ${info.column_names.slice(0,3).join(', ')}${info.column_names.length>3?'...':''}
+                            </h6>
+                        </div>
+                    </div>
+                `;
+            } else {
+                msgEl.className = 'alert alert-danger';
+                msgEl.innerHTML = '❌ ' + data.message;
+            }
+        })
+        .catch(err => {
+            progressArea.classList.add('d-none');
+            resultArea.classList.remove('d-none');
+            const msgEl = document.getElementById('result-message');
+            msgEl.className = 'alert alert-danger';
+            msgEl.innerHTML = '❌ 上传失败: ' + err.message;
+        });
+}
+</script>
+{% endblock %}
