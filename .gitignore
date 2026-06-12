@@ -16,6 +16,9 @@ exports/*
 .vscode/
 .idea/
 
+# 数据库文件
+database/*.db
+
 # 个人文档（仅本地保留）
 个人成果展示文档.md
 

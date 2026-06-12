@@ -2,7 +2,12 @@
 数据管理与分析系统 - 主入口
 小组项目：交互式数据分析系统
 """
-from modules.ml_analysis import kmeans_cluster,calculate_elbow_value
+from modules.ml_analysis import kmeans_cluster, calculate_elbow_value
+from modules.data_cleaning import (
+    get_missing_info, handle_missing,
+    detect_outliers_iqr, detect_outliers_zscore, handle_outliers,
+    AutoCleanConfig
+)
 import os
 from flask import Flask, render_template, request, jsonify, send_file
 from modules.data_manager import DataManager
@@ -143,6 +148,165 @@ def analysis():
                            sil_score=score,
                            group_info=group_cnt,
                            elbow_sse=sse_data)
+
+
+# ==================== 数据清洗路由 ====================
+
+# 自动化清洗配置（模块级存储，开发模式下跨请求保留）
+_auto_clean_config = AutoCleanConfig()
+
+
+@app.route('/cleaning')
+def clean_page():
+    """数据清洗页面"""
+    df = dm.df
+    if df is None:
+        return render_template('cleaning.html', error='请先上传文件')
+
+    stats = dm.get_data_info(df, dm.filepath)
+    missing = get_missing_info(df)
+    columns = df.columns.tolist()
+    numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
+
+    return render_template('cleaning.html',
+                           stats=stats,
+                           missing=missing,
+                           columns=columns,
+                           numeric_columns=numeric_columns,
+                           filename=dm.filename or '未知')
+
+
+@app.route('/cleaning/missing', methods=['POST'])
+def handle_missing_route():
+    """处理缺失值"""
+    df = dm.df
+    if df is None:
+        return jsonify({'success': False, 'message': '请先上传文件'}), 400
+
+    data = request.get_json()
+    columns = data.get('columns', [])
+    method = data.get('method', 'mean')
+    fill_value = str(data.get('fill_value', ''))
+
+    # 未选列则默认全部列
+    if not columns:
+        columns = df.columns.tolist()
+
+    result_df, desc = handle_missing(df, columns, method, fill_value)
+    dm.update_data(result_df, desc)
+
+    return jsonify({
+        'success': True,
+        'message': desc,
+        'missing': get_missing_info(result_df)
+    })
+
+
+@app.route('/cleaning/outlier-detect', methods=['POST'])
+def detect_outliers_route():
+    """检测异常值"""
+    df = dm.df
+    if df is None:
+        return jsonify({'success': False, 'message': '请先上传文件'}), 400
+
+    data = request.get_json()
+    columns = data.get('columns', [])
+    method = data.get('method', 'iqr')
+    threshold = float(data.get('threshold', 1.5))
+
+    if not columns:
+        columns = df.select_dtypes(include=['number']).columns.tolist()
+
+    if method == 'zscore':
+        result = detect_outliers_zscore(df, columns, threshold)
+    else:
+        result = detect_outliers_iqr(df, columns, threshold)
+
+    return jsonify({'success': True, 'result': result})
+
+
+@app.route('/cleaning/outlier-remove', methods=['POST'])
+def remove_outliers_route():
+    """删除异常值行"""
+    df = dm.df
+    if df is None:
+        return jsonify({'success': False, 'message': '请先上传文件'}), 400
+
+    data = request.get_json()
+    indices = data.get('indices', [])
+
+    result_df, desc = handle_outliers(df, indices)
+    dm.update_data(result_df, desc)
+
+    return jsonify({'success': True, 'message': desc})
+
+
+@app.route('/cleaning/duplicates', methods=['POST'])
+def remove_duplicates_route():
+    """删除重复行"""
+    df = dm.df
+    if df is None:
+        return jsonify({'success': False, 'message': '请先上传文件'}), 400
+
+    before = len(df)
+    result_df = df.drop_duplicates()
+    after = len(result_df)
+    desc = f"已删除 {before - after} 条重复行"
+
+    dm.update_data(result_df, desc)
+
+    return jsonify({'success': True, 'message': desc})
+
+
+# ==================== 自动化清洗规则配置 ====================
+
+@app.route('/cleaning/auto-config')
+def get_auto_config():
+    """获取自动化清洗配置"""
+    return jsonify({'success': True, 'config': _auto_clean_config.to_dict()})
+
+
+@app.route('/cleaning/auto-config/save', methods=['POST'])
+def save_auto_config():
+    """保存自动化清洗配置"""
+    global _auto_clean_config
+    data = request.get_json()
+    if data:
+        _auto_clean_config = AutoCleanConfig.from_dict(data)
+    return jsonify({'success': True, 'message': '配置已保存'})
+
+
+@app.route('/cleaning/auto-config/preset', methods=['POST'])
+def load_preset_route():
+    """加载预设清洗配置"""
+    global _auto_clean_config
+    data = request.get_json()
+    preset = data.get('preset', 'standard')
+    _auto_clean_config = AutoCleanConfig.create_preset(preset)
+    return jsonify({
+        'success': True,
+        'message': f'已加载「{_auto_clean_config.config_name}」',
+        'config': _auto_clean_config.to_dict()
+    })
+
+
+@app.route('/cleaning/auto-config/execute', methods=['POST'])
+def execute_auto_config():
+    """执行自动化清洗"""
+    df = dm.df
+    if df is None:
+        return jsonify({'success': False, 'message': '请先上传文件'}), 400
+
+    result_df, logs = _auto_clean_config.execute(df)
+    dm.update_data(result_df, '自动化清洗完成')
+
+    return jsonify({
+        'success': True,
+        'message': '自动化清洗执行完成',
+        'logs': logs,
+        'missing': get_missing_info(result_df)
+    })
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
