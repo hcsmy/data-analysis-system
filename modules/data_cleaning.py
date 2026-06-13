@@ -128,6 +128,45 @@ def handle_missing(df: pd.DataFrame, columns: list[str],
     return df_result, desc
 
 
+# ==================== 异常值检测基线缓存 ====================
+# 解决问题：多次执行"检测→删除异常值→再检测"会导致基线漂移
+#   原因：删除异常值后分布收窄，用新分布重算边界会误杀正常值
+#   方案：首次检测时冻结原始数据分布参数，后续检测始终用冻结参数
+
+
+# 模块级缓存：存储各数值列的原始分布参数（字典）
+# 格式: { '列名': {Q1, Q3, IQR, mean, std, ...} }
+_outlier_baseline: dict | None = None
+_baseline_df_id: int | None = None  # 用于判断 df 是否被替换过（新上传文件）
+
+
+def reset_outlier_baseline():
+    """重置异常值检测基线，下次检测时将重新基于当前数据建立基线。"""
+    global _outlier_baseline, _baseline_df_id
+    _outlier_baseline = None
+    _baseline_df_id = None
+
+
+def _ensure_baseline(df: pd.DataFrame):
+    """若基线未建立则从 df 建立基线（缓存原始分布参数）。"""
+    global _outlier_baseline, _baseline_df_id
+    if _outlier_baseline is None:
+        _outlier_baseline = {}
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        for col in numeric_cols:
+            col_data = df[col].dropna()
+            if len(col_data) < 4:
+                continue
+            _outlier_baseline[col] = {
+                'Q1': float(col_data.quantile(0.25)),
+                'Q3': float(col_data.quantile(0.75)),
+                'IQR': float(col_data.quantile(0.75) - col_data.quantile(0.25)),
+                'mean': float(col_data.mean()),
+                'std': float(col_data.std()),
+            }
+        _baseline_df_id = id(df)
+
+
 # ==================== 异常值检测 ====================
 
 def detect_outliers_iqr(df: pd.DataFrame, columns: list[str],
@@ -135,17 +174,23 @@ def detect_outliers_iqr(df: pd.DataFrame, columns: list[str],
     """
     使用 IQR（四分位距）方法检测异常值
     参数:
-        df: DataFrame
+        df: 当前 DataFrame（用于判断哪些行是异常值）
         columns: 要检测的数值列
         multiplier: IQR 乘数（默认 1.5）
     返回: 检测结果字典
+
+    注意：首次调用时自动以 df 的分布参数建立基线。
+         删除异常值后再次调用，仍用原始基线判断，避免基线漂移。
     """
+    _ensure_baseline(df)
+
     results = {
         'method': 'iqr',
         'multiplier': multiplier,
         'columns': {},
         'total_outliers': 0,
-        'total_outlier_rows': 0
+        'total_outlier_rows': 0,
+        'using_baseline': _baseline_df_id != id(df),  # 标记是否在使用基线
     }
 
     outlier_mask = pd.Series(False, index=df.index)
@@ -156,16 +201,24 @@ def detect_outliers_iqr(df: pd.DataFrame, columns: list[str],
         if not pd.api.types.is_numeric_dtype(df[col]):
             continue
 
-        col_data = df[col].dropna()
-        if len(col_data) < 4:
-            continue
+        # ---- 用基线参数计算边界，基线不存在则从当前 df 计算 ----
+        if _outlier_baseline and col in _outlier_baseline:
+            cached = _outlier_baseline[col]
+            Q1 = cached['Q1']
+            Q3 = cached['Q3']
+            IQR = cached['IQR']
+        else:
+            col_data = df[col].dropna()
+            if len(col_data) < 4:
+                continue
+            Q1 = col_data.quantile(0.25)
+            Q3 = col_data.quantile(0.75)
+            IQR = Q3 - Q1
 
-        Q1 = col_data.quantile(0.25)
-        Q3 = col_data.quantile(0.75)
-        IQR = Q3 - Q1
         lower = Q1 - multiplier * IQR
         upper = Q3 + multiplier * IQR
 
+        # ---- 在当前 df 上判断哪些行越界 ----
         outliers_low = df[col] < lower
         outliers_high = df[col] > upper
         col_outliers = outliers_low | outliers_high
@@ -193,17 +246,23 @@ def detect_outliers_zscore(df: pd.DataFrame, columns: list[str],
     """
     使用 Z-Score 方法检测异常值
     参数:
-        df: DataFrame
+        df: 当前 DataFrame（用于判断哪些行是异常值）
         columns: 要检测的数值列
         threshold: Z-Score 阈值（默认 3.0）
     返回: 检测结果字典
+
+    注意：首次调用时自动以 df 的分布参数建立基线。
+         删除异常值后再次调用，仍用原始基线判断，避免基线漂移。
     """
+    _ensure_baseline(df)
+
     results = {
         'method': 'zscore',
         'threshold': threshold,
         'columns': {},
         'total_outliers': 0,
-        'total_outlier_rows': 0
+        'total_outlier_rows': 0,
+        'using_baseline': _baseline_df_id != id(df),
     }
 
     outlier_mask = pd.Series(False, index=df.index)
@@ -214,15 +273,22 @@ def detect_outliers_zscore(df: pd.DataFrame, columns: list[str],
         if not pd.api.types.is_numeric_dtype(df[col]):
             continue
 
-        col_data = df[col].dropna()
-        if len(col_data) < 4:
-            continue
+        # ---- 用基线参数计算 Z-Score，基线不存在则从当前 df 计算 ----
+        if _outlier_baseline and col in _outlier_baseline:
+            cached = _outlier_baseline[col]
+            mean = cached['mean']
+            std = cached['std']
+        else:
+            col_data = df[col].dropna()
+            if len(col_data) < 4:
+                continue
+            mean = col_data.mean()
+            std = col_data.std()
 
-        mean = col_data.mean()
-        std = col_data.std()
         if std == 0:
             continue
 
+        # ---- 用基线 mean/std 在当前 df 上计算 Z-Score ----
         z_scores = np.abs((df[col] - mean) / std)
         col_outliers = z_scores > threshold
         outlier_mask = outlier_mask | col_outliers

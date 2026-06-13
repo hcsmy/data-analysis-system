@@ -6,7 +6,7 @@ from modules.ml_analysis import kmeans_cluster, calculate_elbow_value
 from modules.data_cleaning import (
     get_missing_info, handle_missing,
     detect_outliers_iqr, detect_outliers_zscore, handle_outliers,
-    AutoCleanConfig
+    AutoCleanConfig, reset_outlier_baseline
 )
 import os
 from flask import Flask, render_template, request, jsonify, send_file
@@ -52,6 +52,9 @@ def upload_file():
     dm.df = df
     dm.filepath = filepath
     dm.filename = file.filename
+
+    # 步骤3.5：新文件上传时重置异常值检测基线
+    reset_outlier_baseline()
 
     # 步骤4：返回摘要信息
     info = dm.get_data_info(df, filepath)
@@ -306,6 +309,13 @@ def execute_auto_config():
         'logs': logs,
         'missing': get_missing_info(result_df)
     })
+
+
+@app.route('/cleaning/reset-baseline', methods=['POST'])
+def reset_baseline_route():
+    """重置异常值检测基线，下次检测将以当前数据重新建立基线"""
+    reset_outlier_baseline()
+    return jsonify({'success': True, 'message': '异常值检测基线已重置，下次检测将以当前数据重新建立基线'})
 
 
 if __name__ == '__main__':

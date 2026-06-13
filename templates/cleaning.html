@@ -226,6 +226,7 @@
                 </div>
                 <div class="card-body">
                     <button class="btn btn-outline-secondary" onclick="removeDuplicates()">删除重复行</button>
+                    <button class="btn btn-outline-warning ms-2" onclick="resetBaseline()">重置异常值基线</button>
                     <button class="btn btn-outline-primary ms-2" onclick="location.reload()">刷新数据状态</button>
                 </div>
             </div>
@@ -339,7 +340,11 @@ document.getElementById('outlier-form').addEventListener('submit', function(e) {
     .then(data => {
         if (data.success) {
             lastOutlierResult = data.result;
-            let html = '<div class="alert alert-warning small"><strong>检测结果</strong><br>';
+            let html = '<div class="alert alert-warning small"><strong>检测结果</strong>';
+            if (data.result.using_baseline) {
+                html += ' <span class="badge bg-info">使用原始基线</span>';
+            }
+            html += '<br>';
             html += '方法: ' + data.result.method.toUpperCase() + ' | ';
             html += '异常值行数: ' + data.result.total_outlier_rows + ' | ';
             html += '异常值点数: ' + data.result.total_outliers + '<br>';
@@ -395,6 +400,15 @@ function removeDuplicates() {
     .then(data => {
         showMessage(data.message, data.success ? 'success' : 'info');
         if (data.success) location.reload();
+    });
+}
+
+function resetBaseline() {
+    if (!confirm('确定要重置异常值检测基线吗？\n\n重置后，下次检测将以当前数据重新建立基线。')) return;
+    fetch('/cleaning/reset-baseline', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+        showMessage(data.message, data.success ? 'success' : 'warning');
     });
 }
 
